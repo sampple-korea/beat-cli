@@ -1,0 +1,22 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+*.pid
+*.swp
+*~
+
+# Runtime credentials, browser sessions, API keys, uploaded files and state.
+.config/
+session.json
+credentials.json
+service.json
+state.json
+api/files/
+api/tmp/
+
+# Local test output.
+coverage/
+tmp/
+test-results/

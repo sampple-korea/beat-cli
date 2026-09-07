@@ -1,0 +1,26 @@
+[Unit]
+Description=BeAT OpenAI-compatible local gateway
+Documentation=file:/root/beat-cli/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/beat-cli
+Environment=HOME=/root
+Environment=XDG_CONFIG_HOME=/root/.config
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /root/beat-cli/server.js
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=180s
+TimeoutStopSec=45s
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

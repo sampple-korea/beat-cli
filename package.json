@@ -1,0 +1,23 @@
+{
+  "name": "beat-cli",
+  "version": "2.0.0",
+  "private": true,
+  "description": "BeAT CLI and local OpenAI-compatible gateway",
+  "type": "commonjs",
+  "bin": {
+    "beat": "./beat.js"
+  },
+  "scripts": {
+    "check": "node --check core.js && node --check api-store.js && node --check server.js && node --check beat.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "playwright-core": "^1.55.0",
+    "turndown": "^7.2.0",
+    "turndown-plugin-gfm": "^1.0.2"
+  },
+  "devDependencies": {
+    "openai": "7.10.0"
+  }
+}
