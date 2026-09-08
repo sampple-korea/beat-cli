@@ -45,6 +45,23 @@ jobs:
       - name: Verify Chromium setup on macOS
         if: runner.os == 'macOS'
         run: node beat.js setup --browser-only
+      - name: Enable Linux user namespaces for Codex bubblewrap
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Match the host preparation used by OpenAI's official codex-action
+          # on GitHub-hosted Ubuntu runners. This enables Codex's sandbox; it
+          # does not disable the Codex workspace-write policy itself.
+          current_userns="$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || true)"
+          if [ -n "$current_userns" ] && [ "$current_userns" != "1" ]; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          current_apparmor="$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true)"
+          if [ -n "$current_apparmor" ] && [ "$current_apparmor" != "0" ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          unshare --user --map-root-user true
       - name: Verify isolated real Codex tool loop
         run: npm run test:codex
       - name: Verify POSIX installer, updates, quoting and state preservation
