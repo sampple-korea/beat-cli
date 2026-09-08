@@ -10,6 +10,7 @@ const os = require('os');
 const path = require('path');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 const testRoot = path.resolve(__dirname, '..', '.test-data');
 fs.mkdirSync(testRoot, { recursive: true, mode: 0o700 });
 const windows = process.platform === 'win32';
@@ -27,6 +28,10 @@ async function main() {
   const original = path.join(temporary, 'ordinary-codex');
   const home = path.join(temporary, 'BeAT Codex');
   fs.mkdirSync(cwd, { recursive: true });
+  // Codex's Linux workspace-write sandbox protects a workspace .git path.
+  // A real minimal repository avoids the non-git cwd bwrap edge case while
+  // still exercising the normal workspace-write + apply_patch path.
+  if (!windows) execFileSync('git', ['init', '--quiet'], { cwd, stdio: 'ignore' });
   fs.mkdirSync(original, { recursive: true });
   const sentinel = 'DO NOT CHANGE ORDINARY CODEX\n';
   fs.writeFileSync(path.join(original, 'config.toml'), sentinel);
