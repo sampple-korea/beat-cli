@@ -1,6 +1,6 @@
 {
   "name": "beat-cli",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "BeAT CLI and local OpenAI-compatible gateway",
   "type": "commonjs",
@@ -8,15 +8,21 @@
     "beat": "./beat.js"
   },
   "scripts": {
-    "check": "node --check core.js && node --check api-store.js && node --check server.js && node --check beat.js",
+    "check": "node scripts/check.js",
+    "test": "node --test",
+    "test:codex": "node scripts/codex-smoke.js",
+    "test:install": "node scripts/install-smoke.js",
     "start": "node server.js"
   },
   "dependencies": {
     "busboy": "^1.6.0",
+    "proper-lockfile": "4.1.2",
+    "ajv": "8.20.0",
     "playwright-core": "^1.55.0",
     "turndown": "^7.2.0",
     "turndown-plugin-gfm": "^1.0.2"
   },
+  "engines": { "node": ">=22" },
   "devDependencies": {
     "openai": "7.10.0"
   }

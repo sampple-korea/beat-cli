@@ -17,6 +17,7 @@ api/files/
 api/tmp/
 
 # Local test output.
+.test-data/
 coverage/
 tmp/
 test-results/

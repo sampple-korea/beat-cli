@@ -5,14 +5,9 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
-const { spawnSync } = require('child_process');
 const core = require('./core');
 const store = require('./api-store');
 const packageInfo = require('./package.json');
-
-const UNIT_SOURCE = path.join(__dirname, 'beat-openai.service');
-const UNIT_TARGET = '/etc/systemd/system/beat-openai.service';
-const SYSTEMCTL = '/usr/bin/systemctl';
 
 function stderr(message) {
   process.stderr.write(`${message}\n`);
@@ -65,7 +60,7 @@ function parseArguments(args, specification = {}) {
       continue;
     }
     const value = inlineValue !== undefined ? inlineValue : args[++index];
-    if (value === undefined) core.fail(`${token} 뒤에 값이 필요합니다.`);
+    if (value === undefined || (inlineValue === undefined && /^--?[a-zA-Z]/.test(value))) core.fail(`${token} 뒤에 값이 필요합니다.`);
     if (definition.type === 'repeat') {
       if (!options[name]) options[name] = [];
       options[name].push(value);
@@ -136,7 +131,7 @@ async function authenticatedOperation(callback, options = {}) {
   let browser = await core.launchBrowser();
   let authenticated = null;
   const onProgress = options.onProgress || (() => {});
-  const autoRefresh = options.autoRefresh !== false;
+  const autoRefresh = options.autoRefresh ?? core.loadSettings().auto_refresh;
   try {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
@@ -284,7 +279,7 @@ async function commandChat(args) {
         streamed = current;
       } : null,
     });
-  }, { autoRefresh: options.refresh !== false, onProgress });
+  }, { autoRefresh: options.refresh, onProgress });
 
   if (options.json) {
     stdout(JSON.stringify(result, null, 2));
@@ -309,7 +304,7 @@ async function commandModels(args) {
   if (positionals.length) core.fail('사용법: beat models [--json]');
   const models = await authenticatedOperation(
     (context) => core.getModelCatalog(context),
-    { autoRefresh: options.refresh !== false, onProgress: progressPrinter(options.quiet) },
+    { autoRefresh: options.refresh, onProgress: progressPrinter(options.quiet) },
   );
   if (options.json) return stdout(JSON.stringify(models, null, 2));
   const keyWidth = Math.max(...models.map((model) => model.key.length));
@@ -331,7 +326,7 @@ async function commandHistory(args) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 200) core.fail('--limit은 1~200 사이 정수여야 합니다.');
   const rows = await authenticatedOperation(
     (context) => core.fetchHistory(context, limit),
-    { autoRefresh: options.refresh !== false, onProgress: progressPrinter(options.quiet) },
+    { autoRefresh: options.refresh, onProgress: progressPrinter(options.quiet) },
   );
   if (options.json) return stdout(JSON.stringify(rows, null, 2));
   if (!rows.length) return stdout('저장된 BeAT 대화가 없습니다.');
@@ -354,7 +349,7 @@ async function commandStatus(args) {
     refreshed: authenticated.refreshed,
     credentials_saved: Boolean(credentials),
     account_type: credentials?.account_type || 'student',
-  }), { autoRefresh: options.refresh !== false, onProgress: progressPrinter(options.quiet) });
+  }), { autoRefresh: options.refresh, onProgress: progressPrinter(options.quiet) });
   if (options.json) return stdout(JSON.stringify(result, null, 2));
   stdout(`로그인 상태: 유효${result.refreshed ? ' (자동 갱신됨)' : ''}`);
   stdout(`자동 갱신 자격 증명: ${result.credentials_saved ? '저장됨' : '없음'}`);
@@ -483,209 +478,24 @@ async function commandFiles(args) {
   core.fail('사용법: beat files upload|list|info|delete');
 }
 
-function systemctl(args, options = {}) {
-  const result = spawnSync(SYSTEMCTL, args, {
-    encoding: 'utf8',
-    stdio: options.inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
-  });
-  if (options.allowFailure) return result;
-  if (result.error) core.fail(`systemctl 실행 실패: ${result.error.message}`);
-  if (result.status !== 0) core.fail(String(result.stderr || result.stdout || 'systemctl 실패').trim());
-  return result;
-}
-
-function serviceState() {
-  const result = systemctl(['is-active', 'beat-openai.service'], { allowFailure: true });
-  return String(result.stdout || '').trim() || 'unknown';
-}
-
-function installServiceUnit() {
-  if (!fs.existsSync(UNIT_SOURCE)) core.fail(`서비스 유닛 템플릿이 없습니다: ${UNIT_SOURCE}`);
-  const source = fs.readFileSync(UNIT_SOURCE);
-  let current = null;
-  try { current = fs.readFileSync(UNIT_TARGET); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  if (!current || !source.equals(current)) {
-    fs.copyFileSync(UNIT_SOURCE, UNIT_TARGET);
-    fs.chmodSync(UNIT_TARGET, 0o644);
-  }
-  systemctl(['daemon-reload']);
-}
-
-async function waitForHealth(config, seconds = 35) {
-  const host = ['0.0.0.0', '::'].includes(config.host) ? '127.0.0.1' : config.host;
-  const url = `http://${host.includes(':') ? `[${host}]` : host}:${config.port}/health`;
-  const deadline = Date.now() + seconds * 1000;
-  let lastError = '';
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
-      if (response.ok) return await response.json();
-      lastError = `HTTP ${response.status}`;
-    } catch (error) {
-      lastError = error.message;
-    }
-    await core.sleep(500);
-  }
-  core.fail(`서비스가 ${seconds}초 안에 준비되지 않았습니다${lastError ? `: ${lastError}` : ''}`);
-}
-
-const SERVICE_OPTIONS = {
-  ...aliases('host', 'value', '--host'),
-  ...aliases('port', 'value', '--port', '-p'),
-  ...aliases('concurrency', 'value', '--concurrency', '-c'),
-  ...aliases('maxUpload', 'value', '--max-upload-mb'),
-  ...aliases('maxInput', 'value', '--max-input-chars'),
-  ...aliases('json', 'boolean', '--json', '-j'),
-  ...aliases('follow', 'boolean', '--follow', '-f'),
-  ...aliases('lines', 'value', '--lines', '-n'),
-  ...aliases('rotate', 'boolean', '--rotate'),
-};
-
-function updateServiceOptions(options) {
-  const changes = {};
-  if (options.host !== undefined) {
-    if (!/^[a-zA-Z0-9:._-]+$/.test(options.host)) core.fail('올바르지 않은 --host 값입니다.');
-    changes.host = options.host;
-  }
-  if (options.port !== undefined) {
-    const port = Number(options.port);
-    if (!Number.isInteger(port) || port < 1 || port > 65535) core.fail('--port는 1~65535 사이 정수여야 합니다.');
-    changes.port = port;
-  }
-  if (options.concurrency !== undefined) {
-    const concurrency = Number(options.concurrency);
-    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) core.fail('--concurrency는 1~8 사이 정수여야 합니다.');
-    changes.concurrency = concurrency;
-  }
-  if (options.maxUpload !== undefined) {
-    const value = Number(options.maxUpload);
-    if (!Number.isFinite(value) || value <= 0 || value > 1024) core.fail('--max-upload-mb는 0~1024 사이 숫자여야 합니다.');
-    changes.max_upload_mb = value;
-  }
-  if (options.maxInput !== undefined) {
-    const value = Number(options.maxInput);
-    if (!Number.isInteger(value) || value < 1000 || value > 2000000) core.fail('--max-input-chars는 1000~2000000 사이 정수여야 합니다.');
-    changes.max_input_chars = value;
-  }
-  return Object.keys(changes).length ? store.saveServiceConfig(changes) : store.loadServiceConfig({ create: true });
-}
-
-async function commandService(args) {
-  const action = args[0] || 'status';
-  const { options, positionals } = parseArguments(args.slice(1), SERVICE_OPTIONS);
-  if (positionals.length) core.fail(`beat service ${action}: 불필요한 인자: ${positionals.join(' ')}`);
-  if (action === 'start' || action === 'restart') {
-    if (!core.loadCredentials({ optional: true }) && !core.loadBeatSession({ optional: true })) {
-      core.fail('먼저 `beat login <아이디>`로 로그인해 주세요.');
-    }
-    const config = updateServiceOptions(options);
-    installServiceUnit();
-    if (!['127.0.0.1', '::1', 'localhost'].includes(config.host)) {
-      stderr('주의: 서비스를 로컬호스트 외 주소에 바인딩합니다. 방화벽과 API 키 노출을 확인하세요.');
-    }
-    const verb = action === 'restart' || serviceState() === 'active' ? 'restart' : 'start';
-    systemctl([verb, 'beat-openai.service']);
-    const health = await waitForHealth(config);
-    stdout(`BeAT OpenAI 호환 서비스 실행 중: http://${config.host}:${config.port}/v1`);
-    stdout(`상태: ${health.status}, 브라우저: ${health.browser}, 동시 작업: ${config.concurrency}`);
-    stdout('API 키 확인: beat service key');
-    return;
-  }
-  if (action === 'stop') {
-    systemctl(['stop', 'beat-openai.service']);
-    stdout('BeAT OpenAI 호환 서비스를 중지했습니다.');
-    return;
-  }
-  if (action === 'status') {
-    const config = store.loadServiceConfig({ create: false });
-    const active = serviceState();
-    const enabledResult = systemctl(['is-enabled', 'beat-openai.service'], { allowFailure: true });
-    const result = {
-      active,
-      enabled: String(enabledResult.stdout || '').trim() || 'not-installed',
-      host: config?.host || '127.0.0.1',
-      port: config?.port || 12124,
-      health: null,
-    };
-    if (active === 'active' && config) {
-      try { result.health = await waitForHealth(config, 3); } catch (error) { result.health = { status: 'unreachable', error: error.message }; }
-    }
-    if (options.json) return stdout(JSON.stringify(result, null, 2));
-    stdout(`서비스: ${active}`);
-    stdout(`부팅 시 자동 시작: ${result.enabled}`);
-    stdout(`주소: http://${result.host}:${result.port}/v1`);
-    if (result.health) stdout(`헬스체크: ${result.health.status}`);
-    return;
-  }
-  if (action === 'enable' || action === 'disable') {
-    installServiceUnit();
-    systemctl([action, 'beat-openai.service']);
-    stdout(action === 'enable' ? '부팅 시 자동 시작을 활성화했습니다.' : '부팅 시 자동 시작을 비활성화했습니다.');
-    return;
-  }
-  if (action === 'logs') {
-    const lines = Number(options.lines || 100);
-    if (!Number.isInteger(lines) || lines < 1 || lines > 10000) core.fail('--lines는 1~10000 사이 정수여야 합니다.');
-    const journalArgs = ['-u', 'beat-openai.service', '-n', String(lines), '--no-pager'];
-    if (options.follow) journalArgs.push('-f');
-    const result = spawnSync('/usr/bin/journalctl', journalArgs, { stdio: 'inherit' });
-    process.exitCode = result.status || 0;
-    return;
-  }
-  if (action === 'key') {
-    const config = options.rotate ? store.rotateServiceKey() : store.loadServiceConfig({ create: true });
-    if (options.rotate && serviceState() === 'active') {
-      systemctl(['restart', 'beat-openai.service']);
-      await waitForHealth(config);
-      stderr('API 키를 교체하고 서비스를 재시작했습니다.');
-    }
-    stdout(config.api_key);
-    return;
-  }
-  if (action === 'url') {
-    const config = store.loadServiceConfig({ create: true });
-    return stdout(`http://${config.host}:${config.port}/v1`);
-  }
-  if (action === 'install') {
-    updateServiceOptions(options);
-    installServiceUnit();
-    stdout(`systemd 유닛을 설치했습니다: ${UNIT_TARGET}`);
-    return;
-  }
-  if (action === 'test') {
-    const config = store.loadServiceConfig({ create: true });
-    if (serviceState() !== 'active') core.fail('서비스가 실행 중이 아닙니다. `beat service start`를 먼저 실행하세요.');
-    const host = ['0.0.0.0', '::'].includes(config.host) ? '127.0.0.1' : config.host;
-    const response = await fetch(`http://${host.includes(':') ? `[${host}]` : host}:${config.port}/v1/responses`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${config.api_key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: core.loadSettings().model, input: '연결 시험입니다. 짧게 확인이라고 답하세요.' }),
-      signal: AbortSignal.timeout(12 * 60 * 1000),
-    });
-    const value = await response.json();
-    if (!response.ok) core.fail(value.error?.message || `HTTP ${response.status}`);
-    stdout(value.output_text || value.output?.[0]?.content?.[0]?.text || JSON.stringify(value));
-    return;
-  }
-  core.fail('사용법: beat service start|stop|restart|status|logs|key|url|enable|disable|install|test');
-}
-
 async function commandRepl(args) {
   const { options, positionals } = parseArguments(args, CHAT_OPTIONS);
   if (positionals.length) core.fail('사용법: beat repl [--model 모델] [--continue ID|last]');
   if (!process.stdin.isTTY) core.fail('대화형 모드는 TTY 터미널에서 실행해 주세요.');
   const onProgress = progressPrinter(options.quiet);
   const browser = await core.launchBrowser();
-  let authenticated = await core.ensureAuthenticated(browser, { autoRefresh: options.refresh !== false, onProgress });
-  let context = authenticated.context;
+  let authenticated, context, terminal;
+  const autoRefresh = options.refresh ?? core.loadSettings().auto_refresh;
+  try {
+  authenticated = await core.ensureAuthenticated(browser, { autoRefresh, onProgress });
+  context = authenticated.context;
   let conversationId = await resolveConversationOption(context, options.conversation);
   let model = options.model;
   let effort = options.effort;
   let pendingFiles = [];
-  const terminal = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: 'beat> ' });
+  terminal = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: 'beat> ' });
   stdout('BeAT 대화형 모드입니다. /help로 명령을 확인하세요.');
   terminal.prompt();
-  try {
     for await (const rawLine of terminal) {
       const line = rawLine.trim();
       if (!line) { terminal.prompt(); continue; }
@@ -746,7 +556,7 @@ async function commandRepl(args) {
           });
           break;
         } catch (error) {
-          if (attempt || options.refresh === false || error.code !== 'SESSION_EXPIRED') throw error;
+          if (attempt || !autoRefresh || error.code !== 'SESSION_EXPIRED') throw error;
           await context.close().catch(() => {});
           await core.forceRefresh(browser, onProgress);
           authenticated = await core.ensureAuthenticated(browser, { onProgress });
@@ -758,8 +568,8 @@ async function commandRepl(args) {
       terminal.prompt();
     }
   } finally {
-    terminal.close();
-    await context.close().catch(() => {});
+    terminal?.close();
+    await context?.close().catch(() => {});
     await browser.close().catch(() => {});
   }
 }
@@ -771,14 +581,14 @@ async function commandDoctor(args) {
   if (positionals.length) core.fail('사용법: beat doctor [--json]');
   const checks = [];
   const add = (name, ok, detail) => checks.push({ name, ok, detail });
-  add('node', Number(process.versions.node.split('.')[0]) >= 18, process.version);
+  add('node', Number(process.versions.node.split('.')[0]) >= 22, process.version);
   try { add('chromium', true, core.findChromium()); } catch (error) { add('chromium', false, error.message); }
   add('session_file', Boolean(core.loadBeatSession({ optional: true })), core.PATHS.session);
   add('credentials_file', Boolean(core.loadCredentials({ optional: true })), core.PATHS.credentials);
   for (const [name, filename] of [['session_permissions', core.PATHS.session], ['credentials_permissions', core.PATHS.credentials], ['service_permissions', core.PATHS.service]]) {
     try {
       const mode = fs.statSync(filename).mode & 0o777;
-      add(name, mode === 0o600, mode.toString(8));
+      add(name, process.platform === 'win32' || mode === 0o600, process.platform === 'win32' ? 'Windows ACL; POSIX mode not applicable' : mode.toString(8));
     } catch (error) {
       add(name, error.code === 'ENOENT', error.code === 'ENOENT' ? 'not-created' : error.message);
     }
@@ -789,15 +599,11 @@ async function commandDoctor(args) {
   } catch (error) {
     add('beat_session', false, error.message);
   }
-  add('systemd_service', serviceState() === 'active', serviceState());
-  const config = store.loadServiceConfig({ create: false });
-  if (config && serviceState() === 'active') {
-    try { const health = await waitForHealth(config, 3); add('api_health', health.status === 'ok', health.status); }
-    catch (error) { add('api_health', false, error.message); }
-  } else add('api_health', true, 'not-running');
+  const runningService = await require('./service').status();
+  add('api_health', runningService.active !== 'unreachable', runningService.active);
   if (options.json) stdout(JSON.stringify(checks, null, 2));
   else checks.forEach((check) => stdout(`${check.ok ? 'OK  ' : 'FAIL'} ${check.name}: ${check.detail}`));
-  if (checks.some((check) => !check.ok && !['systemd_service', 'beat_session'].includes(check.name))) process.exitCode = 1;
+  if (checks.some((check) => !check.ok && check.name !== 'beat_session')) process.exitCode = 1;
 }
 
 function printHelp() {
@@ -805,6 +611,9 @@ function printHelp() {
     `BeAT CLI ${packageInfo.version}`,
     '',
     '사용법:',
+    '  beat setup [--with-deps]              사용자 전용 Codex·Chromium 설치',
+    '  beat codex [옵션] [Codex 인자]        BeAT 모델 기반의 별도 Codex',
+    '  beat codex config|models|doctor      전용 모델/추론 설정·조회·진단',
     '  beat login <아이디> [비밀번호]       학생 계정 로그인, 세션·갱신 정보 저장',
     '  beat refresh                         저장된 정보로 세션 강제 갱신',
     '  beat chat [옵션] <메시지>            기본적으로 매번 새 대화',
@@ -828,16 +637,18 @@ function printHelp() {
     '  --plain --meta --timeout <초> --no-refresh --quiet',
     '',
     'service 명령:',
-    '  start|stop|restart|status|logs|key|url|enable|disable|install|test',
+    '  start|run|stop|restart|status|logs|key|url|enable|disable|install|test',
     '  start 옵션: --host, --port(기본 12124), --concurrency, --max-upload-mb',
     '',
     '비밀번호 인자를 생략하면 화면에 표시되지 않는 방식으로 입력합니다.',
   ].join('\n'));
 }
 
-async function main() {
-  const [command, ...args] = process.argv.slice(2);
+async function main(argv = process.argv.slice(2)) {
+  const [command, ...args] = argv;
   switch (command) {
+    case 'setup': return require('./platform').setup(args);
+    case 'codex': return require('./codex').command(args);
     case 'login': return commandLogin(args);
     case 'refresh': return commandRefresh(args);
     case 'chat': return commandChat(args);
@@ -850,7 +661,7 @@ async function main() {
     case 'logout': return commandLogout(args);
     case 'config': return commandConfig(args);
     case 'files': return commandFiles(args);
-    case 'service': return commandService(args);
+    case 'service': return require('./service').command(args);
     case 'doctor': return commandDoctor(args);
     case 'version':
     case '--version':
@@ -863,8 +674,10 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+if (require.main === module) main().catch((error) => {
   stderr(`오류: ${error.message}`);
   if (process.env.BEAT_DEBUG) stderr(error.stack || '');
-  process.exit(error.exitCode || 1);
+  process.exitCode = error.exitCode || 1;
 });
+
+module.exports = { main, parseArguments, aliases, prepareLocalFiles };

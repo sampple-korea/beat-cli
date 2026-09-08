@@ -3,6 +3,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
+const platform = require('./platform');
 const { chromium } = require('playwright-core');
 const TurndownService = require('turndown');
 const { gfm } = require('turndown-plugin-gfm');
@@ -56,7 +58,9 @@ function ensureConfigDir() {
 
 function secureWriteJson(filename, value) {
   ensureConfigDir();
-  const tempFile = path.join(CONFIG_DIR, `.${path.basename(filename)}-${process.pid}-${Date.now()}.tmp`);
+  const parent = path.dirname(path.resolve(filename));
+  fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const tempFile = path.join(parent, `.${path.basename(filename)}-${crypto.randomUUID()}.tmp`);
   try {
     fs.writeFileSync(tempFile, `${JSON.stringify(value, null, 2)}\n`, {
       encoding: 'utf8',
@@ -139,36 +143,22 @@ async function writeBeatSession(context) {
 }
 
 function findChromium() {
-  const candidates = [
-    process.env.BEAT_CHROMIUM_PATH,
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/google-chrome',
-  ].filter(Boolean);
-  const found = candidates.find((candidate) => {
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  });
-  if (!found) fail('Chromium 실행 파일을 찾지 못했습니다. BEAT_CHROMIUM_PATH를 지정해 주세요.');
-  return found;
+  return platform.findChromium();
 }
 
 async function launchBrowser() {
-  return chromium.launch({
-    executablePath: findChromium(),
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--lang=ko-KR',
-    ],
-  });
+  const args = ['--disable-dev-shm-usage', '--disable-gpu', '--lang=ko-KR'];
+  // Chromium refuses to start as Linux root unless its sandbox is disabled.
+  // Keep the sandbox enabled for ordinary macOS/Linux/Windows users.
+  if (!platform.browserSandboxEnabled()) args.unshift('--no-sandbox');
+  try {
+    return await chromium.launch({ executablePath: findChromium(), headless: true, chromiumSandbox: platform.browserSandboxEnabled(), args });
+  } catch (error) {
+    const hint = process.platform === 'linux'
+      ? ' `beat setup --with-deps`로 Chromium과 시스템 라이브러리를 점검하거나 BEAT_CHROMIUM_PATH를 지정해 주세요.'
+      : ' `beat setup`으로 Chromium을 점검하거나 BEAT_CHROMIUM_PATH를 지정해 주세요.';
+    fail(`Chromium을 시작하지 못했습니다.${hint} 원인: ${error.message}`, 3, 'BROWSER_LAUNCH_FAILED');
+  }
 }
 
 function contextOptions(storageState) {
@@ -377,28 +367,14 @@ const STATIC_MODEL_ALIASES = Object.freeze({
 
 function modelHint(requested) {
   if (!requested) return DEFAULT_SETTINGS.model;
+  if (typeof requested !== 'string') fail('모델 이름은 문자열이어야 합니다.');
   const lower = requested.toLowerCase();
   if (STATIC_MODEL_ALIASES[lower]) return STATIC_MODEL_ALIASES[lower];
   if (lower.startsWith('chat_')) return lower;
   return requested;
 }
 
-function parseModelCatalog(scriptText) {
-  const decoded = scriptText.replace(/\\"/g, '"');
-  const pattern = /"(chat_[a-zA-Z0-9_]+)":\{"key":"[^"]+","title":"([^"]+)"[\s\S]*?"reasoning_efforts":\[([^\]]*)\],"reasoning_effort_default":(?:"([^"]*)"|null)/g;
-  const models = new Map();
-  let match;
-  while ((match = pattern.exec(decoded))) {
-    if (models.has(match[1])) continue;
-    models.set(match[1], {
-      key: match[1],
-      title: match[2],
-      efforts: [...match[3].matchAll(/"([^"]+)"/g)].map((item) => item[1]),
-      default_effort: match[4] || null,
-    });
-  }
-  return [...models.values()];
-}
+const { parseModelCatalog } = require('./model-catalog');
 
 async function getModelCatalogFromPage(page) {
   const scripts = (await page.locator('script').allTextContents()).join('\n');
@@ -473,7 +449,7 @@ function validateConversationId(value) {
   } catch {
     // The input is an ID rather than a URL.
   }
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate)) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate)) {
     fail(`올바르지 않은 대화 ID: ${value}`);
   }
   return candidate;
@@ -506,18 +482,21 @@ async function navigateChatPage(page, url) {
 
 async function prepareResolvedChatPage(context, requestedModel, requestedEffort, effortExplicit, conversationId) {
   const page = await setupPage(context);
-  const initialUrl = buildChatUrl(modelHint(requestedModel), requestedEffort, conversationId);
-  let textarea = await navigateChatPage(page, initialUrl);
-  const models = await getModelCatalogFromPage(page);
-  const model = resolveModel(requestedModel, models);
-  const effort = resolveEffort(requestedEffort, model, effortExplicit);
-  const resolvedUrl = buildChatUrl(model.key, effort, conversationId);
-  const current = new URL(page.url());
-  const resolved = new URL(resolvedUrl);
-  if (current.pathname + current.search !== resolved.pathname + resolved.search) {
-    textarea = await navigateChatPage(page, resolvedUrl);
+  try {
+    const initialUrl = buildChatUrl(modelHint(requestedModel), requestedEffort, conversationId);
+    let textarea = await navigateChatPage(page, initialUrl);
+    const models = await getModelCatalogFromPage(page);
+    const model = resolveModel(requestedModel, models);
+    const effort = resolveEffort(requestedEffort, model, effortExplicit);
+    const resolvedUrl = buildChatUrl(model.key, effort, conversationId);
+    const current = new URL(page.url());
+    const resolved = new URL(resolvedUrl);
+    if (current.pathname + current.search !== resolved.pathname + resolved.search) textarea = await navigateChatPage(page, resolvedUrl);
+    return { page, textarea, models, model, effort, resolvedUrl };
+  } catch (error) {
+    await page.close().catch(() => {});
+    throw error;
   }
-  return { page, textarea, models, model, effort, resolvedUrl };
 }
 
 async function getModelCatalog(context) {
@@ -591,7 +570,7 @@ function createTurndown() {
   return service;
 }
 
-async function waitForAnswer(page, baselineUserCount, timeoutMilliseconds, onPartial) {
+async function waitForAnswer(page, baselineUserCount, timeoutMilliseconds, onPartial, signal) {
   const startedAt = Date.now();
   let lastSignature = '';
   let stableCount = 0;
@@ -599,6 +578,7 @@ async function waitForAnswer(page, baselineUserCount, timeoutMilliseconds, onPar
   let userAppeared = false;
 
   while (Date.now() - startedAt < timeoutMilliseconds) {
+    signal?.throwIfAborted();
     if (page.isClosed()) fail('응답 대기 중 브라우저 페이지가 닫혔습니다.', 3, 'BROWSER_CLOSED');
     if (new URL(page.url()).pathname.startsWith('/auth/login')) {
       fail('응답 대기 중 BeAT 세션이 만료되었습니다.', 2, 'SESSION_EXPIRED');
@@ -623,7 +603,7 @@ async function waitForAnswer(page, baselineUserCount, timeoutMilliseconds, onPar
       // A non-generating answer that has stayed unchanged for several polls is
       // complete even when the separate "답변 출처" activity is outside the
       // message group's DOM subtree.
-      if (candidate.hasSource || (!snapshot.generating && stableCount >= 5)) {
+      if (candidate.streamState === 'complete' || (!snapshot.generating && stableCount >= 5)) {
         return candidate;
       }
     }
@@ -659,6 +639,7 @@ async function sendMessage(page, textarea, message, options) {
     baseline.userCount,
     options.timeoutSeconds * 1000,
     options.onPartial,
+    options.signal,
   );
   return {
     markdown: candidate.html ? createTurndown().turndown(candidate.html).trim() : candidate.text.trim(),
@@ -676,7 +657,9 @@ async function runChat(context, message, options = {}) {
   const settings = loadSettings();
   const requestedModel = options.model || settings.model;
   const requestedEffort = options.effort ?? settings.reasoning_effort;
-  const timeoutSeconds = options.timeoutSeconds || settings.timeout_seconds;
+  const timeoutSeconds = options.timeoutSeconds ?? settings.timeout_seconds;
+  if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) fail('시간 제한은 양수여야 합니다.');
+  options.signal?.throwIfAborted();
   const startedAt = Date.now();
   const prepared = await prepareResolvedChatPage(
     context,
@@ -691,6 +674,7 @@ async function runChat(context, message, options = {}) {
       attachments: options.attachments || [],
       onProgress: options.onProgress,
       onPartial: options.onPartial,
+      signal: options.signal,
     });
     return {
       answer: options.plain ? answer.plain : answer.markdown,
@@ -762,6 +746,7 @@ module.exports = {
   ensureAuthenticated,
   forceRefresh,
   modelHint,
+  parseModelCatalog,
   normalizeEffort,
   resolveModel,
   resolveEffort,

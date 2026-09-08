@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const lockfile = require('proper-lockfile');
 const {
   PATHS,
   ensureConfigDir,
@@ -93,7 +94,8 @@ function emptyState() {
 function loadState() {
   ensureApiDirs();
   const saved = readJson(STATE_FILE, { optional: true, label: 'API 상태 파일' });
-  if (!saved || saved.version !== 1) return emptyState();
+  if (!saved) return emptyState();
+  if (saved.version !== 1) fail('지원하지 않는 API 상태 파일 버전입니다. 기존 데이터를 덮어쓰지 않습니다.');
   return {
     ...emptyState(),
     ...saved,
@@ -107,7 +109,7 @@ function loadState() {
 function pruneMap(record, maximum = MAX_STORED_RECORDS) {
   const entries = Object.entries(record);
   if (entries.length <= maximum) return record;
-  entries.sort((a, b) => (b[1].created_at || 0) - (a[1].created_at || 0));
+  entries.sort((a, b) => (b[1].created_at || b[1].created || 0) - (a[1].created_at || a[1].created || 0));
   return Object.fromEntries(entries.slice(0, maximum));
 }
 
@@ -121,11 +123,19 @@ function saveState(state) {
 let mutationQueue = Promise.resolve();
 
 function mutateState(mutator) {
-  const task = mutationQueue.then(() => {
-    const state = loadState();
-    const result = mutator(state);
-    saveState(state);
-    return result;
+  const task = mutationQueue.then(async () => {
+    ensureApiDirs();
+    const release = await lockfile.lock(STATE_FILE, {
+      realpath: false, stale: 60000,
+      retries: { retries: 300, factor: 1, minTimeout: 100, maxTimeout: 100 },
+    });
+    try {
+      const state = loadState();
+      expireFiles(state);
+      const result = await mutator(state);
+      saveState(state);
+      return result;
+    } finally { await release(); }
   });
   mutationQueue = task.catch(() => {});
   return task;
@@ -174,7 +184,7 @@ function rotateServiceKey() {
 }
 
 function safeFilename(value) {
-  const basename = path.basename(String(value || 'upload.bin')).replace(/[\0\r\n]/g, '_');
+  const basename = String(value || 'upload.bin').replace(/\\/g, '/').split('/').at(-1).replace(/[\x00-\x1f\x7f]/g, '_');
   return basename.slice(0, 240) || 'upload.bin';
 }
 
@@ -226,35 +236,36 @@ async function storeUploadedFile(tempPath, info = {}) {
     mime_type: guessMimeType(filename, info.mimeType),
     blob_path: blobPath,
   };
-  await mutateState((state) => {
-    state.files[id] = metadata;
-  });
+  try {
+    await mutateState((state) => { state.files[id] = metadata; });
+  } catch (error) {
+    fs.rmSync(blobPath, { force: true });
+    throw error;
+  }
   return fileObject(metadata);
 }
 
-function cleanupExpiredFiles() {
-  const state = loadState();
-  const now = unixNow();
-  let changed = false;
+function safeBlobPath(value) {
+  return typeof value === 'string' && path.dirname(path.resolve(value)) === path.resolve(FILES_DIR);
+}
+
+function expireFiles(state) {
   for (const [id, metadata] of Object.entries(state.files)) {
-    if (!metadata.expires_at || metadata.expires_at > now) continue;
-    try {
-      fs.unlinkSync(metadata.blob_path);
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-    }
+    if (!metadata.expires_at || metadata.expires_at > unixNow()) continue;
+    if (safeBlobPath(metadata.blob_path)) fs.rmSync(metadata.blob_path, { force: true });
     delete state.files[id];
-    changed = true;
   }
-  if (changed) saveState(state);
+}
+
+function cleanupExpiredFiles() {
+  return mutateState(() => {});
 }
 
 function getStoredFile(id) {
-  cleanupExpiredFiles();
   return readState((state) => {
-    const metadata = state.files[id];
-    if (!metadata) return null;
-    if (!metadata.blob_path.startsWith(`${FILES_DIR}${path.sep}`)) return null;
+    const metadata = Object.hasOwn(state.files, id) && state.files[id];
+    if (!metadata || (metadata.expires_at && metadata.expires_at <= unixNow())) return null;
+    if (!safeBlobPath(metadata.blob_path)) return null;
     try {
       fs.accessSync(metadata.blob_path, fs.constants.R_OK);
     } catch {
@@ -265,9 +276,8 @@ function getStoredFile(id) {
 }
 
 function listStoredFiles(options = {}) {
-  cleanupExpiredFiles();
   return readState((state) => {
-    let rows = Object.values(state.files);
+    let rows = Object.values(state.files).filter((item) => !item.expires_at || item.expires_at > unixNow());
     if (options.purpose) rows = rows.filter((item) => item.purpose === options.purpose);
     rows.sort((a, b) => options.order === 'asc'
       ? a.created_at - b.created_at
@@ -290,9 +300,9 @@ function listStoredFiles(options = {}) {
 
 async function deleteStoredFile(id) {
   return mutateState((state) => {
-    const metadata = state.files[id];
+    const metadata = Object.hasOwn(state.files, id) && state.files[id];
     if (!metadata) return false;
-    if (metadata.blob_path.startsWith(`${FILES_DIR}${path.sep}`)) {
+    if (safeBlobPath(metadata.blob_path)) {
       try {
         fs.unlinkSync(metadata.blob_path);
       } catch (error) {
@@ -452,7 +462,7 @@ function makeTempFile(extension = '.bin') {
 }
 
 function cleanupTemp(directory) {
-  if (!directory || !directory.startsWith(`${TEMP_DIR}${path.sep}`)) return;
+  if (!directory || path.dirname(path.resolve(directory)) !== path.resolve(TEMP_DIR)) return;
   fs.rmSync(directory, { recursive: true, force: true });
 }
 
@@ -469,8 +479,10 @@ module.exports = {
   saveState,
   mutateState,
   readState,
+  normalizeServiceConfig,
   loadServiceConfig,
   saveServiceConfig,
+  cleanupExpiredFiles,
   rotateServiceKey,
   safeFilename,
   guessMimeType,
