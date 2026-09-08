@@ -114,6 +114,26 @@ test('supported platforms and exact version validation', () => {
   assert.equal(platform.validateVersion('0.153.4'), '0.153.4');
   for (const invalid of ['latest', '../1.2.3', '1.2.3;echo bad', '-g']) assert.throws(() => platform.validateVersion(invalid));
 });
+test('Linux Codex sandbox diagnostics detect user namespace and AppArmor blockers', () => {
+  const procRoot = path.join(temporary, 'fake-proc-sys');
+  fs.mkdirSync(path.join(procRoot, 'kernel'), { recursive: true });
+  fs.mkdirSync(path.join(procRoot, 'user'), { recursive: true });
+  fs.writeFileSync(path.join(procRoot, 'kernel', 'unprivileged_userns_clone'), '0\n');
+  fs.writeFileSync(path.join(procRoot, 'kernel', 'apparmor_restrict_unprivileged_userns'), '1\n');
+  fs.writeFileSync(path.join(procRoot, 'user', 'max_user_namespaces'), '0\n');
+  const blocked = platform.linuxSandboxStatus(procRoot, 'linux');
+  assert.equal(blocked.ok, false);
+  assert.deepEqual(blocked.issues, [
+    'kernel.unprivileged_userns_clone=0',
+    'user.max_user_namespaces=0',
+    'kernel.apparmor_restrict_unprivileged_userns=1',
+  ]);
+  fs.writeFileSync(path.join(procRoot, 'kernel', 'unprivileged_userns_clone'), '1\n');
+  fs.writeFileSync(path.join(procRoot, 'kernel', 'apparmor_restrict_unprivileged_userns'), '0\n');
+  fs.writeFileSync(path.join(procRoot, 'user', 'max_user_namespaces'), '65536\n');
+  assert.equal(platform.linuxSandboxStatus(procRoot, 'linux').ok, true);
+  assert.equal(platform.linuxSandboxStatus(procRoot, 'darwin'), null);
+});
 test('browser discovery includes macOS applications and Windows standard locations', () => {
   assert.ok(platform.chromiumCandidates({}, 'darwin').some((item) => item.includes('Google Chrome.app')));
   assert.ok(platform.chromiumCandidates({ LOCALAPPDATA: 'C:\\Test User' }, 'win32').some((item) => item.includes('chrome.exe')));

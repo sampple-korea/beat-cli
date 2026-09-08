@@ -78,6 +78,30 @@ async function runElevated(command, args, options = {}) {
   return run(sudo, [command, ...args], options);
 }
 
+function linuxSandboxStatus(procRoot = '/proc/sys', platformName = process.platform) {
+  if (platformName !== 'linux') return null;
+  const read = (...parts) => {
+    try { return fs.readFileSync(path.join(procRoot, ...parts), 'utf8').trim(); } catch (error) {
+      if (error.code === 'ENOENT' || error.code === 'EACCES') return null;
+      throw error;
+    }
+  };
+  const unprivileged = read('kernel', 'unprivileged_userns_clone');
+  const maximum = read('user', 'max_user_namespaces');
+  const apparmor = read('kernel', 'apparmor_restrict_unprivileged_userns');
+  const issues = [];
+  if (unprivileged === '0') issues.push('kernel.unprivileged_userns_clone=0');
+  if (maximum !== null && /^\d+$/.test(maximum) && BigInt(maximum) === 0n) issues.push('user.max_user_namespaces=0');
+  if (apparmor !== null && apparmor !== '0') issues.push(`kernel.apparmor_restrict_unprivileged_userns=${apparmor}`);
+  return {
+    ok: issues.length === 0,
+    unprivileged_userns_clone: unprivileged,
+    max_user_namespaces: maximum,
+    apparmor_restrict_unprivileged_userns: apparmor,
+    issues,
+  };
+}
+
 function linuxChromiumInstaller(env = process.env, release) {
   const linux = require('./linux-setup');
   const plan = linux.browserInstallPlan(release || linux.currentRelease());
@@ -277,4 +301,4 @@ async function setup(args = []) {
   console.log('설치 및 브라우저 시작 확인 완료. BeAT 계정은 beat login <아이디>로 연결하세요.');
 }
 
-module.exports = { CODEX_VERSION, dataHome, supportedPlatform, run, npmInvocation, commandInPath, linuxChromiumInstaller, browserSandboxEnabled, validateVersion, ensureCodex, chromiumCandidates, findChromium, ensureChromium, setup };
+module.exports = { CODEX_VERSION, dataHome, supportedPlatform, run, npmInvocation, commandInPath, linuxSandboxStatus, linuxChromiumInstaller, browserSandboxEnabled, validateVersion, ensureCodex, chromiumCandidates, findChromium, ensureChromium, setup };

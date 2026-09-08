@@ -232,6 +232,19 @@ async function doctor(home, jsonOutput) {
   add('node', Number(process.versions.node.split('.')[0]) >= 22, process.version);
   try { add('platform', true, platform.supportedPlatform()); } catch (error) { add('platform', false, error.message); }
   add('isolated_home', true, home);
+  if (process.platform === 'linux') {
+    try {
+      const sandbox = platform.linuxSandboxStatus();
+      const observed = [
+        `unprivileged_userns_clone=${sandbox.unprivileged_userns_clone ?? 'unknown'}`,
+        `max_user_namespaces=${sandbox.max_user_namespaces ?? 'unknown'}`,
+        `apparmor_restrict_unprivileged_userns=${sandbox.apparmor_restrict_unprivileged_userns ?? 'unknown'}`,
+      ].join(', ');
+      add('linux_codex_sandbox', sandbox.ok, sandbox.ok
+        ? observed
+        : `${sandbox.issues.join(', ')}. Codex bubblewrap용 unprivileged user namespace를 OS 관리자 정책에 맞게 허용해야 합니다. (${observed})`);
+    } catch (error) { add('linux_codex_sandbox', false, `Linux sandbox 설정을 읽지 못했습니다: ${error.message}`); }
+  }
   try { add('chromium', true, platform.findChromium()); } catch (error) { add('chromium', false, error.message); }
   try {
     const root = path.join(platform.dataHome(), 'codex-runtime');
