@@ -36,7 +36,7 @@ try {
   const command = path.join(bin, 'beat');
   assert.equal(run(command, ['version']).stdout.trim(), require('../package.json').version);
   const activated = run('/bin/sh', ['-c', '. "$1"; command -v beat; beat version', 'installer-test', path.join(data, 'env')]);
-  assert.equal(activated.stdout.trim().split('\n')[0], command);
+  assert.equal(fs.realpathSync(activated.stdout.trim().split('\n')[0]), fs.realpathSync(command));
   const first = fs.readFileSync(command, 'utf8');
   const config = path.join(env.XDG_CONFIG_HOME, 'beat-cli');
   fs.mkdirSync(config, { recursive: true });

@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const lockfile = require('proper-lockfile');
+const platform = require('./platform');
 const {
   PATHS,
   ensureConfigDir,
@@ -338,9 +339,18 @@ function markupToText(value) {
     .trim();
 }
 
+function documentTool(name, extra = []) {
+  const found = platform.commandInPath(name) || extra.find((candidate) => {
+    try { fs.accessSync(candidate, fs.constants.X_OK); return fs.statSync(candidate).isFile(); } catch { return false; }
+  });
+  if (!found) fail(`${name} 실행 파일을 찾지 못했습니다. PATH에 설치하거나 해당 문서 형식에 필요한 도구를 설치해 주세요.`);
+  return found;
+}
+
 function unzipText(filename, patterns, maxBuffer) {
+  const unzip = documentTool('unzip', ['/usr/bin/unzip', '/opt/homebrew/bin/unzip', '/usr/local/bin/unzip']);
   try {
-    return execFileSync('/usr/bin/unzip', ['-p', filename, ...patterns], {
+    return execFileSync(unzip, ['-p', filename, ...patterns], {
       encoding: 'utf8',
       maxBuffer,
       timeout: 60_000,
@@ -408,8 +418,9 @@ function extractDocumentText(filename, options = {}) {
       ? markupToText(buffer.toString('utf8'))
       : buffer.toString('utf8');
   } else if (extension === '.pdf') {
+    const pdftotext = documentTool('pdftotext', ['/usr/bin/pdftotext', '/opt/homebrew/bin/pdftotext', '/usr/local/bin/pdftotext']);
     try {
-      text = execFileSync('/usr/bin/pdftotext', ['-layout', '-enc', 'UTF-8', filename, '-'], {
+      text = execFileSync(pdftotext, ['-layout', '-enc', 'UTF-8', filename, '-'], {
         encoding: 'utf8',
         maxBuffer,
         timeout: 90_000,

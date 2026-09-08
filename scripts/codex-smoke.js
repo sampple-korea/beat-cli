@@ -13,7 +13,9 @@ const crypto = require('crypto');
 const testRoot = path.resolve(__dirname, '..', '.test-data');
 fs.mkdirSync(testRoot, { recursive: true, mode: 0o700 });
 const windows = process.platform === 'win32';
-const temporary = fs.mkdtempSync(path.join(windows ? os.tmpdir() : testRoot, 'codex-smoke-'));
+// Exercise a standalone workspace, not a gitignored subtree of this tool's own
+// checkout. Codex protects its own installation/configuration repository paths.
+const temporary = fs.mkdtempSync(path.join(windows ? os.tmpdir() : path.resolve(__dirname, '..', '..'), '.beat-codex-smoke-'));
 process.env.XDG_CONFIG_HOME = path.join(temporary, 'config');
 process.env.BEAT_DATA_HOME = process.env.BEAT_TEST_RUNTIME_HOME || path.join(testRoot, 'runtime');
 const platform = require('../platform');
@@ -56,7 +58,10 @@ async function main() {
       } else {
         assert.ok(request.prompt.includes('도구 실행 결과'), 'Tool results must not be dropped on the next request.');
         if (windows) assert.ok(request.prompt.includes('[도구 실행 결과: '), 'Real Codex must execute get_goal and return its correlated result.');
-        else assert.equal(fs.readFileSync(path.join(cwd, 'beat-codex-proof.txt'), 'utf8').trim(), 'BEAT_CODEX_SMOKE_OK');
+        else {
+          if (!fs.existsSync(path.join(cwd, 'beat-codex-proof.txt'))) process.stderr.write(`Codex tool result: ${request.prompt.slice(request.prompt.lastIndexOf('[도구 실행 결과: '), -1).slice(0, 8000)}\n`);
+          assert.equal(fs.readFileSync(path.join(cwd, 'beat-codex-proof.txt'), 'utf8').trim(), 'BEAT_CODEX_SMOKE_OK');
+        }
         answer = JSON.stringify({ beat_protocol: 'tool_v1', final: 'BEAT_CODEX_SMOKE_OK' });
       }
       return { answer, answer_plain: answer, answer_markdown: answer, model: model.key, reasoning_effort: request.effort, conversation_id: crypto.randomUUID(), elapsed_seconds: 0 };
