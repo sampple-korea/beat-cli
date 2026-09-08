@@ -14,7 +14,7 @@ const testRoot = path.resolve(__dirname, '..', '.test-data');
 fs.mkdirSync(testRoot, { recursive: true, mode: 0o700 });
 const windows = process.platform === 'win32';
 // Exercise a standalone workspace, not a gitignored subtree of this tool's own
-// checkout. Codex protects its own installation/configuration repository paths.
+// checkout. Keep the test project separate from the installation under test.
 const temporary = fs.mkdtempSync(path.join(windows ? os.tmpdir() : path.resolve(__dirname, '..', '..'), '.beat-codex-smoke-'));
 process.env.XDG_CONFIG_HOME = path.join(temporary, 'config');
 process.env.BEAT_DATA_HOME = process.env.BEAT_TEST_RUNTIME_HOME || path.join(testRoot, 'runtime');
