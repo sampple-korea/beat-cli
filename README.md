@@ -295,6 +295,10 @@ beat codex doctor
 
 Linux root 환경에서는 Chromium 자체 제약 때문에 브라우저 샌드박스를 비활성화합니다. 일반 사용자 환경에서는 `chromiumSandbox: true`를 명시합니다. 컨테이너나 사용자 네임스페이스 제한 때문에 Chromium 샌드박스를 시작할 수 없을 때에만 `BEAT_CHROMIUM_NO_SANDBOX=1`을 명시적으로 선택할 수 있습니다. 이 선택은 브라우저 격리를 약화하므로 신뢰할 수 있는 전용 환경에서만 사용하세요. **이 변수는 Codex의 파일/명령 실행 샌드박스를 끄지 않습니다.**
 
+Linux에서는 Codex의 bubblewrap 샌드박스에 필요한 사용자 네임스페이스를 호스트가 허용해야 합니다. Ubuntu의 AppArmor 정책이나 컨테이너 보안 정책이 이를 막으면 모델 연결은 되어도 파일 쓰기/명령 실행은 실패할 수 있습니다. 설치기는 이 문제를 숨기려고 Codex 샌드박스를 끄거나 커널·AppArmor 설정을 자동 변경하지 않습니다. 관리자가 해당 환경에서 Codex 샌드박스를 실행할 수 있도록 호스트 정책을 준비해야 합니다. 이 저장소의 일회용 GitHub Ubuntu CI는 [OpenAI 공식 codex-action의 호스트 준비 방식](https://github.com/openai/codex-action/blob/main/action.yml)을 적용한 환경에서 검증합니다.
+
+Linux에서 소스 체크아웃의 `npm run test:sandbox`를 실행하면 실제 Codex 샌드박스가 **시험 작업 폴더 안의 쓰기는 허용하고 밖의 쓰기는 거부하는지** 확인합니다. 실제 프로젝트나 사용자 설정은 수정하지 않으며, 임시 시험 파일은 종료 시 정리합니다. 호스트 제한으로 실패하면 샌드박스 없는 재시도를 하지 않습니다.
+
 Windows 네이티브 Codex의 파일 쓰기는 Codex 자체의 Windows 샌드박스 설정 상태에도 영향을 받습니다. 이 프로젝트의 Windows 통합 시험은 읽기 전용 도구 왕복을 검증하고, macOS/Linux 시험은 실제 파일 패치를 검증합니다. 같은 결과를 모든 OS/CPU/배포판에서 실행해 확인했다는 의미는 아닙니다.
 
 ---

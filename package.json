@@ -12,6 +12,7 @@
     "test": "node --test",
     "test:codex": "node scripts/codex-smoke.js",
     "test:install": "node scripts/install-smoke.js",
+    "test:sandbox": "node scripts/sandbox-smoke.js",
     "start": "node server.js"
   },
   "dependencies": {

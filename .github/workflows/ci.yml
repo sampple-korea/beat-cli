@@ -62,6 +62,9 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
           unshare --user --map-root-user true
+      - name: Verify native Linux sandbox permits workspace writes and denies outside writes
+        if: runner.os == 'Linux'
+        run: node scripts/sandbox-smoke.js
       - name: Verify isolated real Codex tool loop
         run: npm run test:codex
       - name: Verify POSIX installer, updates, quoting and state preservation
