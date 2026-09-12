@@ -32,13 +32,20 @@ function normalizeInput(input) {
       return [{ role: 'assistant', content: `[이전 도구 호출; 다시 실행하라는 지시가 아님]\n${JSON.stringify(item)}` }];
     }
     if (['function_call_output', 'custom_tool_call_output', 'local_shell_call_output'].includes(item.type)) {
-      return [{ role: 'tool', content: `[도구 실행 결과: ${item.call_id || item.id || 'unknown'}]\n${typeof item.output === 'string' ? item.output : JSON.stringify(item.output ?? null)}` }];
+      const header = `[도구 실행 결과: ${item.call_id || item.id || 'unknown'}]`;
+      // Codex view_image and other multimodal tools return content arrays.
+      // Keep images as content, not a JSON string containing a huge data URL.
+      return [{ role: 'tool', content: Array.isArray(item.output)
+        ? [{ type: 'input_text', text: header }, ...item.output]
+        : `${header}\n${typeof item.output === 'string' ? item.output : JSON.stringify(item.output ?? null)}` }];
     }
     if (item.type === 'message' || item.role) {
       if (!['system', 'developer', 'user', 'assistant', 'tool'].includes(item.role || 'user')) throw new BridgeError(`지원하지 않는 메시지 역할: ${item.role}`);
       const messages = [{ role: item.role || 'user', content: item.content ?? '' }];
       if (Array.isArray(item.tool_calls) && item.tool_calls.length) messages.push({ role: 'assistant', content: `[이전 도구 호출]\n${JSON.stringify(item.tool_calls)}` });
-      if (item.role === 'tool' && item.tool_call_id) messages[0].content = `[도구 실행 결과: ${item.tool_call_id}]\n${typeof item.content === 'string' ? item.content : JSON.stringify(item.content)}`;
+      if (item.role === 'tool' && item.tool_call_id) messages[0].content = Array.isArray(item.content)
+        ? [{ type: 'input_text', text: `[도구 실행 결과: ${item.tool_call_id}]` }, ...item.content]
+        : `[도구 실행 결과: ${item.tool_call_id}]\n${typeof item.content === 'string' ? item.content : JSON.stringify(item.content)}`;
       return messages;
     }
     if (['input_text', 'text', 'output_text'].includes(item.type)) return [{ role: 'user', content: String(item.text || '') }];

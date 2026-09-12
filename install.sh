@@ -10,8 +10,8 @@ usage() {
 Usage: sh install.sh [--with-deps] [--no-setup] [--no-path] [--force]
 
 Installs BeAT in the current user's directory. Never overwrites ordinary codex.
-  --with-deps  Allow the browser setup to install system packages (may use sudo).
-  --no-setup   Install BeAT only; defer Codex/browser downloads until beat setup.
+  --with-deps  Allow system Node.js packages on Alpine (may use sudo).
+  --no-setup   Install BeAT only; defer Codex download until beat setup.
   --no-path    Do not append PATH setup to shell profiles.
   --force      Explicitly replace an existing, non-BeAT command at BEAT_BIN_DIR/beat.
   --help       Show this help without downloads or filesystem changes.
@@ -241,5 +241,5 @@ say 'Activate PATH in the current sh/bash/zsh terminal:'
 printf '  . ' >&2; quote "$ENV_FILE" >&2; printf '\n' >&2
 say 'Then connect your BeAT account (not OpenAI): beat login <username>'
 say 'Launch: beat codex'
-if [ "$SETUP" = 0 ]; then say 'Codex/browser setup was deferred. Run beat setup (or beat setup --with-deps on Linux).'; fi
+if [ "$SETUP" = 0 ]; then say 'Codex setup was deferred. Run beat setup; Chromium is not required.'; fi
 say 'Existing ordinary codex settings and credentials were not modified.'

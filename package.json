@@ -1,6 +1,6 @@
 {
   "name": "beat-cli",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "private": true,
   "description": "BeAT CLI and local OpenAI-compatible gateway",
   "type": "commonjs",
@@ -11,6 +11,8 @@
     "check": "node scripts/check.js",
     "test": "node --test",
     "test:codex": "node scripts/codex-smoke.js",
+    "test:live-codex": "node scripts/live-codex-smoke.js",
+    "test:live-api": "node scripts/live-api-smoke.js",
     "test:install": "node scripts/install-smoke.js",
     "test:sandbox": "node scripts/sandbox-smoke.js",
     "start": "node server.js"

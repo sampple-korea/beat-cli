@@ -279,7 +279,7 @@ async function setup(args = []) {
   const allowed = new Set(['--with-deps', '--browser-only', '--help', '-h']);
   for (const arg of args) if (!allowed.has(arg)) throw new Error(`알 수 없는 setup 옵션: ${arg}`);
   if (args.includes('--help') || args.includes('-h')) {
-    console.log('beat setup [--with-deps] [--browser-only]\n사용자 전용 Codex와 Chromium 설치. --with-deps는 Linux 시스템 라이브러리 설치를 명시적으로 허용합니다.');
+    console.log('beat setup [--browser-only] [--with-deps]\n사용자 전용 Codex 설치. HTTP 로그인과 채팅은 Chromium이 필요 없습니다.\n--browser-only는 웹 진단용 Chromium을 별도로 설치합니다.');
     return;
   }
   if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Node.js 22 이상이 필요합니다.');
@@ -287,6 +287,8 @@ async function setup(args = []) {
   if (!args.includes('--browser-only')) {
     const codex = await ensureCodex({ onProgress });
     console.log(`Codex: ${codex.version}`);
+    console.log('설치 완료. beat login <아이디> 후 beat codex를 실행하세요.');
+    return;
   }
   const browser = await ensureChromium({ withDeps: args.includes('--with-deps'), onProgress });
   // Detect missing shared libraries now, not after the user enters credentials.

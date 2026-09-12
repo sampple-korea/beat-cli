@@ -90,7 +90,7 @@ function validateForwarded(args) {
 function modelCatalog(models, selectedKey) {
   const sorted = [...models].sort((a, b) => (b.key === selectedKey ? 1 : 0) - (a.key === selectedKey ? 1 : 0));
   return { models: sorted.map((model, index) => ({
-    slug: model.key, display_name: model.title, description: 'BeAT browser adapter (tool calls are emulated from text)',
+    slug: model.key, display_name: model.title, description: 'BeAT Direct Line adapter (tool calls are emulated from text)',
     default_reasoning_level: model.default_effort || 'none',
     supported_reasoning_levels: (model.efforts.length ? model.efforts : ['none']).map((effort) => ({ effort, description: effort === 'none' ? '추론 단계 없음' : `BeAT 추론 단계: ${effort}` })),
     shell_type: 'unified_exec', visibility: 'list', supported_in_api: true, priority: index,
@@ -214,7 +214,7 @@ function help() {
     '  beat codex config                  모델/추론 선택 후 기본값 저장',
     '  beat codex config --model sol --reasoning high --no-prompt',
     '  beat codex config show|reset        전용 설정 조회/초기화 (일반 codex는 유지)',
-    '  beat codex setup                   설치, 브라우저, 모델 목록 및 설정 준비',
+    '  beat codex setup                   설치, HTTP 연결, 모델 목록 및 설정 준비',
     '  beat codex install                 Codex만 설치 (BeAT 로그인 불필요)',
     '  beat codex update                  최신 Codex로 명시적 업데이트',
     '  beat codex update --codex-version 0.153.4   특정 버전 선택/복구',
@@ -245,7 +245,7 @@ async function doctor(home, jsonOutput) {
         : `${sandbox.issues.join(', ')}. Codex bubblewrap용 unprivileged user namespace를 OS 관리자 정책에 맞게 허용해야 합니다. (${observed})`);
     } catch (error) { add('linux_codex_sandbox', false, `Linux sandbox 설정을 읽지 못했습니다: ${error.message}`); }
   }
-  try { add('chromium', true, platform.findChromium()); } catch (error) { add('chromium', false, error.message); }
+  add('transport', true, 'HTTP / Direct Line (Chromium 불필요)');
   try {
     const root = path.join(platform.dataHome(), 'codex-runtime');
     const pointer = JSON.parse(fs.readFileSync(path.join(root, 'current.json'), 'utf8'));
@@ -285,7 +285,6 @@ async function command(args) {
       onProgress(`캐시 모델 목록 사용 (${cached.fetched_at}); 현재 계정의 접근 가능 여부는 실행 시 다시 확인합니다.`);
     } else {
       if (!core.loadBeatSession({ optional: true }) && !core.loadCredentials({ optional: true })) throw new Error('OpenAI 로그인은 필요하지 않습니다. BeAT 계정 연결을 위해 먼저 `beat login <아이디>`를 실행하세요.');
-      await platform.ensureChromium({ onProgress });
       runtime = new BeatRuntime({ concurrency: 2 });
       models = await runtime.models({ refresh: true });
       core.secureWriteJson(locations(home).cache, { fetched_at: new Date().toISOString(), models });
@@ -301,7 +300,7 @@ async function command(args) {
     if (['setup', 'config'].includes(action) || !preferences.model || options.choose) savePreferences(home, selected.model, selected.effort);
     prepareHome(home, models, selected.model.key);
     if (action === 'setup' || action === 'config') { console.log(`BeAT Codex 기본값: ${selected.model.title} / ${selected.effort || 'none'}\n실행: beat codex`); return; }
-    if (!runtime) { await platform.ensureChromium({ onProgress }); runtime = new BeatRuntime({ concurrency: 2 }); }
+    if (!runtime) runtime = new BeatRuntime({ concurrency: 2 });
     onProgress(`BeAT Codex: ${selected.model.title} / ${selected.effort || 'none'} (일반 codex와 분리됨)`);
     const result = await launchCodex({ installed, ...selected, models, home, forwarded, runtime });
     process.exitCode = result.code;

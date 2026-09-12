@@ -100,6 +100,17 @@ test('unsupported input is rejected instead of silently discarded', () => {
 test('opaque reasoning content is not reinterpreted as a user instruction', () => {
   assert.deepEqual(bridge.normalizeInput([{ type: 'reasoning', encrypted_content: 'opaque' }]), []);
 });
+test('view_image tool result arrays keep image data as multimodal content', () => {
+  const image = { type: 'input_image', image_url: 'data:image/png;base64,example' };
+  const normalized = bridge.normalizeInput([{ type: 'function_call_output', call_id: 'call_image', output: [
+    { type: 'input_text', text: 'Image opened.' }, image,
+  ] }]);
+  assert.equal(normalized[0].role, 'tool');
+  assert.match(normalized[0].content[0].text, /call_image/);
+  assert.deepEqual(normalized[0].content[2], image);
+  const chat = bridge.normalizeInput([{ role: 'tool', tool_call_id: 'call_image', content: [image] }]);
+  assert.deepEqual(chat[0].content[1], image);
+});
 test('SSE tool output is typed and never streams the control envelope as output_text', () => {
   const output = bridge.decodeAnswer(envelope([{ name: 'read_file', arguments: { path: 'x' } }, { name: 'apply_patch', input: 'patch' }]), protocol).output;
   const events = [];

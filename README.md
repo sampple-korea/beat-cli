@@ -1,16 +1,18 @@
-# BeAT CLI 2.1
+# BeAT CLI 2.2
 
 부산교육청 **BeAT** 웹 채팅을 터미널에서 사용하고, 필요하면 **OpenAI Codex CLI 자체를 BeAT 모델 백엔드로 실행**할 수 있게 연결하는 비공식 개인용 CLI입니다.
 
 `beat codex`는 시스템에 `codex`가 없어도 BeAT 전용 Codex를 자동으로 설치합니다. OpenAI 로그인이나 `OPENAI_API_KEY`를 요구하지 않고, BeAT에 실제로 표시되는 모델과 해당 모델의 추론 단계를 읽어 Codex 모델 선택에 사용합니다. 일반 `codex`의 로그인, 설정, 세션, 실행 파일은 건드리지 않습니다.
 
-> 이 프로젝트는 BeAT의 공식 API가 아니라 웹 UI 어댑터입니다. BeAT 화면 구조, 로그인 정책, 모델 제공 범위 또는 사용량 제한이 바뀌면 일부 기능도 영향을 받을 수 있습니다.
+로그인·모델 조회·채팅은 HTTP / Next.js Server Actions / Direct Line 요청으로 처리합니다. 일반 실행에는 Chromium이 필요하지 않습니다. API 모드에서는 BeAT의 `new_assistant_enabled=false`를 요청하고, 호출자가 보낸 시스템 지침과 도구 정의를 보존합니다.
+
+> BeAT의 공식 OpenAI API는 아닙니다. 서버에 네이티브 system/tools 필드를 직접 전달하는 경로는 확인되지 않았으므로 역할과 도구 호출을 텍스트 프로토콜로 연결합니다. BeAT 서버의 기본 지침·기능이 완전히 제거된다고 보장하지 않습니다. [구현·실제 검증 범위](DIRECT-API.md)를 참고하세요.
 
 ## 가장 빠른 시작
 
 ### macOS / Linux 자동 설치
 
-`install.sh`는 **Node.js 22가 없어도** 가능한 환경에서는 사용자 전용 Node를 함께 준비하고, BeAT 자체·전용 Codex·Chromium을 사용자 디렉터리에 설치합니다. 일반 `codex`는 덮어쓰지 않습니다.
+`install.sh`는 **Node.js 22가 없어도** 가능한 환경에서는 사용자 전용 Node를 함께 준비하고, BeAT와 전용 Codex를 사용자 디렉터리에 설치합니다. 일반 `codex`는 덮어쓰지 않으며 Chromium 다운로드는 생략합니다.
 
 안전하게 스크립트를 먼저 내려받아 확인한 뒤 실행하는 방법:
 
@@ -26,21 +28,21 @@ beat login <아이디>
 beat codex
 ```
 
-Linux에서 Chromium 시스템 패키지/공유 라이브러리까지 설치를 허용하려면:
+Alpine에서 Node.js/npm 시스템 패키지 설치가 필요하면:
 
 ```bash
 sh install-beat.sh --with-deps
 ```
 
-`--with-deps`는 필요할 때 `sudo`를 사용할 수 있습니다. Alpine은 `apk`, Fedora/RHEL 계열은 `dnf`/`yum`, Arch 계열은 `pacman`, openSUSE는 `zypper`, Void는 `xbps-install`, Debian/Ubuntu 계열은 Playwright의 의존성 설치 경로를 사용하도록 대비되어 있습니다. 저장소 추가나 전체 시스템 업데이트는 자동으로 하지 않습니다.
+`--with-deps`는 필요할 때 `sudo`를 사용할 수 있습니다. 일반 HTTP 실행에는 브라우저 공유 라이브러리가 필요하지 않습니다. 웹 진단용 브라우저는 별도로 `beat setup --browser-only --with-deps`로 설치할 수 있습니다.
 
 설치 스크립트는 기본적으로 `~/.local/bin/beat` 런처를 만들고 `.profile`, `.bashrc`, `.zshrc` 및 fish `conf.d`에 중복 없는 PATH 설정을 추가합니다. 없는 프로필은 생성하며, `--no-path`로 이 변경을 생략할 수 있습니다. 설치 경로에 공백·작은따옴표가 있어도 처리합니다. `XDG_DATA_HOME` 또는 `BEAT_DATA_HOME`을 바꿨다면 기본 경로 대신 설치 마지막에 출력된 `env` 경로를 사용하세요. **기존의 관리 대상이 아닌 `beat` 명령은 자동 덮어쓰지 않습니다.**
 
 주요 설치 옵션:
 
 ```text
---with-deps   Linux 브라우저 시스템 의존성 설치 허용
---no-setup    BeAT만 설치하고 Codex/Chromium 준비는 나중으로 미룸
+--with-deps   필요한 Alpine Node.js 시스템 패키지 설치 허용
+--no-setup    BeAT만 설치하고 Codex 준비는 나중으로 미룸
 --no-path     셸 프로필을 수정하지 않음
 --force       기존의 비-BeAT beat 런처 교체를 명시적으로 허용
 ```
@@ -66,7 +68,7 @@ node beat.js login <아이디>
 node beat.js codex
 ```
 
-`beat codex` 자체도 전용 Codex가 없으면 자동 설치합니다. Chromium이 없으면 `beat setup`이 준비하고, Linux에서 실행 라이브러리까지 필요한 경우 `beat setup --with-deps`를 사용하면 됩니다.
+`beat codex` 자체도 전용 Codex가 없으면 자동 설치합니다. 로그인·API·Codex 실행은 브라우저 설치를 요구하지 않습니다.
 
 ---
 
@@ -82,7 +84,7 @@ node beat.js codex
 4. `OPENAI_API_KEY`, `OPENAI_BASE_URL`, 일반 Codex 인증 환경변수를 자식 프로세스에 넘기지 않습니다.
 5. BeAT 계정에서 현재 사용 가능한 모델과 각 모델의 추론 단계를 읽습니다.
 6. 로컬 `127.0.0.1` 임시 포트에 실행마다 새로운 임의 키를 가진 게이트웨이를 엽니다.
-7. Codex의 Responses API 요청을 BeAT 웹 채팅으로 전달하고, Codex가 보낸 도구 정의를 BeAT 모델이 사용할 수 있는 엄격한 텍스트 프로토콜로 변환합니다.
+7. Codex의 Responses API 요청을 BeAT에 직접 HTTP 전송하고, Codex가 보낸 도구 정의를 BeAT 모델이 사용할 수 있는 엄격한 텍스트 프로토콜로 변환합니다.
 8. 모델이 도구 호출을 요청하면 게이트웨이가 이를 실제 Responses API `function_call`/`custom_tool_call`로 변환합니다. **실제 명령 실행·파일 수정은 Codex 클라이언트가 자신의 샌드박스와 승인 정책 안에서 수행**합니다.
 9. 실제 도구 실행 결과가 다음 BeAT 요청에 다시 전달되고, 최종 답변이 나올 때까지 Codex의 정상적인 도구 루프가 이어집니다.
 
@@ -231,7 +233,7 @@ beat codex doctor
 beat codex doctor --json
 ```
 
-Node 버전, 지원 플랫폼, BeAT 전용 홈 분리 여부, Chromium, 전용 Codex 설치, BeAT 인증 파일 존재 여부를 확인합니다. 실제 BeAT 세션 유효성은 다음으로 확인합니다.
+Node 버전, 지원 플랫폼, BeAT 전용 홈 분리 여부, HTTP 전송, 전용 Codex 설치, BeAT 인증 파일 존재 여부를 확인합니다. 실제 BeAT 세션 유효성은 다음으로 확인합니다.
 
 ```bash
 beat status
@@ -273,27 +275,26 @@ export BEAT_DATA_HOME="$HOME/.local/share/my-beat-cli"
 
 ## macOS / Linux 호환성
 
-| 환경 | BeAT Codex 자동 설치 | Chromium 준비 | 자동 시작 서비스 |
+| 환경 | BeAT Codex 자동 설치 | HTTP 실행 | 자동 시작 서비스 |
 |---|---|---|---|
-| macOS Apple Silicon (arm64) | 지원 | Chrome/Chromium/Edge 또는 Playwright Chromium | LaunchAgent |
-| macOS Intel (x64) | 지원 | Chrome/Chromium/Edge 또는 Playwright Chromium | LaunchAgent |
-| Linux glibc arm64 | 지원 | Playwright Chromium 또는 시스템 Chromium/Chrome | systemd `--user`가 있으면 지원 |
-| Linux glibc x64 | 지원 | Playwright Chromium 또는 시스템 Chromium/Chrome | systemd `--user`가 있으면 지원 |
-| Alpine Linux arm64/x64 | Codex 설치 지원 | `beat setup --with-deps`가 `apk`로 Chromium 의존성 준비 | 환경에 따라 `beat service start/run` 사용 |
-| Windows arm64/x64 | 지원 | Chrome/Edge/Chromium 또는 Playwright Chromium | 로그인 자동 시작은 미지원, `start/run` 사용 |
+| macOS Apple Silicon (arm64) | 지원 | Node.js 22+ | LaunchAgent |
+| macOS Intel (x64) | 지원 | Node.js 22+ | LaunchAgent |
+| Linux glibc arm64 | 지원 | Node.js 22+ | systemd `--user`가 있으면 지원 |
+| Linux glibc x64 | 지원 | Node.js 22+ | systemd `--user`가 있으면 지원 |
+| Alpine Linux arm64/x64 | Codex 설치 지원 | Node.js 22+ (`apk`) | 환경에 따라 `beat service start/run` 사용 |
+| Windows arm64/x64 | 지원 | Node.js 22+ | 로그인 자동 시작은 미지원, `start/run` 사용 |
 
 Codex 공식 npm 패키지가 현재 제공하는 플랫폼 조합에 맞춰 `darwin/linux/win32`의 `x64/arm64`를 지원합니다.
 
 ### “모든 Linux”에 대한 현실적인 범위
 
-일반적인 glibc 기반 배포판과 Alpine을 별도 처리하지만, 임의의 libc/CPU/컨테이너 정책까지 포함한 모든 Linux에서 무조건 실행된다고 보장할 수는 없습니다. 최소 이미지나 특수 배포판에서 Playwright 시스템 라이브러리를 설치할 수 없다면 이미 설치된 Chromium 계열 브라우저를 지정할 수 있습니다.
+일반적인 glibc 기반 배포판과 Alpine을 별도 처리하지만, 임의의 libc/CPU/컨테이너 정책까지 포함한 모든 Linux에서 무조건 실행된다고 보장할 수는 없습니다. HTTP 로그인은 브라우저 라이브러리 없이 동작합니다.
 
 ```bash
-export BEAT_CHROMIUM_PATH=/absolute/path/to/chromium
 beat codex doctor
 ```
 
-Linux root 환경에서는 Chromium 자체 제약 때문에 브라우저 샌드박스를 비활성화합니다. 일반 사용자 환경에서는 `chromiumSandbox: true`를 명시합니다. 컨테이너나 사용자 네임스페이스 제한 때문에 Chromium 샌드박스를 시작할 수 없을 때에만 `BEAT_CHROMIUM_NO_SANDBOX=1`을 명시적으로 선택할 수 있습니다. 이 선택은 브라우저 격리를 약화하므로 신뢰할 수 있는 전용 환경에서만 사용하세요. **이 변수는 Codex의 파일/명령 실행 샌드박스를 끄지 않습니다.**
+웹 진단용 Chromium을 별도로 실행하는 경우에만 `BEAT_CHROMIUM_PATH` 등의 브라우저 옵션이 적용됩니다. **이 변수는 Codex의 파일/명령 실행 샌드박스를 끄지 않습니다.**
 
 Linux에서는 Codex의 bubblewrap 샌드박스에 필요한 사용자 네임스페이스를 호스트가 허용해야 합니다. Ubuntu의 AppArmor 정책이나 컨테이너 보안 정책이 이를 막으면 모델 연결은 되어도 파일 쓰기/명령 실행은 실패할 수 있습니다. `beat codex doctor`는 Linux에서 `kernel.unprivileged_userns_clone`, `user.max_user_namespaces`, `kernel.apparmor_restrict_unprivileged_userns`를 읽어 알려진 차단 상태를 `linux_codex_sandbox` 항목으로 표시합니다. 설치기는 이 문제를 숨기려고 Codex 샌드박스를 끄거나 커널·AppArmor 설정을 자동 변경하지 않습니다. 관리자가 해당 환경에서 Codex 샌드박스를 실행할 수 있도록 호스트 정책을 준비해야 합니다. 이 저장소의 일회용 GitHub Ubuntu CI는 [OpenAI 공식 codex-action의 호스트 준비 방식](https://github.com/openai/codex-action/blob/main/action.yml)을 적용한 환경에서 검증합니다.
 
@@ -570,9 +571,9 @@ print(response.output_text)
 
 Codex의 호스팅 `web_search`는 이 어댑터에서 지원하지 않으므로 `beat codex`에서는 비활성화합니다. 로컬 셸/파일 도구 등 Codex 클라이언트가 실제로 광고하는 도구는 위 브리지로 왕복할 수 있습니다.
 
-샘플링 파라미터처럼 BeAT 웹 UI에 전달할 수 없는 값은 일부 호환 요청에서 수락하더라도 실제 생성에 반영되지 않을 수 있으며 `x_beat.warnings`에 표시합니다. 토큰 사용량은 근삿값이며 `x_beat.usage_estimated=true`입니다.
+샘플링 파라미터처럼 확인된 BeAT 요청 형식에 없는 값은 일부 호환 요청에서 수락하더라도 실제 생성에 반영되지 않을 수 있으며 `x_beat.warnings`에 표시합니다. 시스템 역할도 텍스트 변환이므로 `system_messages_emulated_from_text`로 표시합니다. 토큰 사용량은 근삿값이며 `x_beat.usage_estimated=true`입니다.
 
-게이트웨이의 SSE는 연결 유지 이벤트를 먼저 보내고, 모델 답변을 완성·검증한 뒤 텍스트 또는 도구 이벤트를 보냅니다. 현재 게이트웨이는 답변 토큰을 생성 즉시 전달하는 네이티브 스트리밍을 제공하지 않습니다. `beat chat --stream`의 웹 화면 부분 답변 출력과는 구분됩니다.
+게이트웨이의 SSE는 연결 유지 이벤트를 먼저 보내고, 모델 답변을 완성·검증한 뒤 텍스트 또는 도구 이벤트를 보냅니다. 도구 인자의 불완전한 JSON을 실행하지 않습니다. `beat chat --stream`은 Direct Line 부분 답변을 출력합니다.
 
 입력이 설정한 문자 수 제한을 넘으면 최신 요청이나 도구 스키마를 잘라내지 않고 HTTP 413을 반환합니다. Codex 모델 목록의 32,768 토큰 컨텍스트 값은 어댑터의 보수적 운영 예산이며, BeAT 기저 모델의 실제 컨텍스트 한도를 측정한 값이 아닙니다. 호스팅 웹 검색, 서버 측 background 작업, 원격 compaction 등 모든 OpenAI 기능을 대체하지는 않습니다.
 
@@ -618,11 +619,10 @@ beat codex doctor
 beat status
 ```
 
-Chromium 문제:
+Codex 설치 문제:
 
 ```bash
 beat setup
-beat setup --with-deps        # Linux 시스템 라이브러리까지 필요한 경우
 ```
 
 Linux에서 Codex 파일/명령 샌드박스가 시작되지 않으면 먼저 다음을 확인합니다.
@@ -636,10 +636,10 @@ sysctl kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true
 
 `linux_codex_sandbox`가 실패하면 호스트 관리자 정책 문제입니다. 특히 상시 사용하는 서버에서 BeAT 설치기가 이를 자동 완화하지는 않습니다. 커널/AppArmor 설정 변경은 시스템 전체 보안에 영향을 줄 수 있으므로 해당 서버의 보안 정책에 맞춰 관리자가 판단해야 합니다.
 
-직접 브라우저 지정:
+웹 진단용 브라우저 별도 준비 (일반 실행에는 필요 없음):
 
 ```bash
-BEAT_CHROMIUM_PATH=/absolute/path/to/chromium beat codex
+beat setup --browser-only --with-deps
 ```
 
 BeAT 모델이 바뀌었는지 확인:
@@ -713,7 +713,14 @@ BEAT_SMOKE_BOOTSTRAP_NODE=1 npm run test:install
 
 GitHub Actions는 **Ubuntu, macOS, Windows**에서 구문·회귀·실제 Codex 도구 루프를 검사하고, Ubuntu/macOS에서는 브라우저 준비와 POSIX 설치기도 시험합니다. 실제 실행된 OS/Node 조합과 성공 여부는 저장소 Actions 실행 결과에서 확인하세요.
 
-통합 시험의 BeAT 응답은 결정적인 가짜 백엔드를 사용합니다. 실제 BeAT 계정으로 로그인하고 모델이 도구 프로토콜을 따르는지까지 확인하려면 `beat status`, `beat codex models`, `beat codex exec`를 실제 계정에서 실행해야 합니다. 자동 시험 통과만으로 BeAT의 현재 웹 UI/계정별 모델 접근까지 검증되었다고 간주하지 않습니다.
+기본 통합 시험은 결정적인 가짜 BeAT 백엔드를 사용합니다. 기존 BeAT 로그인으로 실서비스까지 시험하려면 아래 명령을 명시적으로 실행합니다. 계정 사용량이 발생하고 BeAT에 테스트 대화가 생성됩니다. 비밀번호는 시험 스크립트에서 받거나 기록하지 않습니다.
+
+```bash
+BEAT_LIVE_TEST=1 npm run test:live-api
+BEAT_LIVE_TEST=1 npm run test:live-codex
+```
+
+실제 Codex 시험은 임시 Git 프로젝트에서 무작위 숫자를 읽어 계산하고 `apply_patch`로 파일을 생성한 뒤 셸로 재검증합니다. 시험이 끝나면 임시 로컬 프로젝트는 제거합니다.
 
 의존성 보안 확인:
 
@@ -726,7 +733,7 @@ npm audit --omit=dev
 ## 주요 명령 빠른 참고
 
 ```text
-beat setup [--with-deps]                Codex/Chromium 준비 및 실행 점검
+beat setup                              전용 Codex 준비 (브라우저 불필요)
 beat login <아이디>                     BeAT 로그인
 beat status                             BeAT 세션 확인
 

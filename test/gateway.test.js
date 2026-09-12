@@ -235,15 +235,15 @@ test('aborted queued requests are removed without consuming a slot', async () =>
   assert.equal(semaphore.waiters.length, 0);
   release(); assert.equal(semaphore.active, 0);
 });
-test('concurrent runtime browser creation is shared and cleaned up', async () => {
+test('concurrent runtime HTTP client creation is shared and cleaned up', async () => {
   const core = require('../core');
-  const original = core.launchBrowser;
+  const original = core.launchClient;
   let launches = 0, closed = false;
   const browser = { isConnected: () => true, on() {}, async close() { closed = true; } };
-  core.launchBrowser = async () => { launches += 1; await new Promise((resolve) => setTimeout(resolve, 5)); return browser; };
+  core.launchClient = async () => { launches += 1; await new Promise((resolve) => setTimeout(resolve, 5)); return browser; };
   try {
     const real = new BeatRuntime({ concurrency: 2 });
     assert.deepEqual(await Promise.all([real.ensureBrowser(), real.ensureBrowser()]), [browser, browser]);
     assert.equal(launches, 1); await real.close(); assert.ok(closed);
-  } finally { core.launchBrowser = original; }
+  } finally { core.launchClient = original; }
 });

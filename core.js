@@ -161,6 +161,10 @@ async function launchBrowser() {
   }
 }
 
+async function launchClient() {
+  return new (require('./direct').HttpClient)();
+}
+
 function contextOptions(storageState) {
   return {
     ...(storageState ? { storageState } : {}),
@@ -193,6 +197,7 @@ async function getSession(context) {
 }
 
 async function performLogin(browser, username, password, options = {}) {
+  if (browser.isDirect) return require('./direct').login(browser, username, password, options);
   const { storeCredentials = false, onProgress = () => {} } = options;
   const context = await newContext(browser);
   let lastDialog = '';
@@ -500,6 +505,7 @@ async function prepareResolvedChatPage(context, requestedModel, requestedEffort,
 }
 
 async function getModelCatalog(context) {
+  if (context.isDirect) return require('./direct').models(context);
   const settings = loadSettings();
   const page = await setupPage(context);
   try {
@@ -654,6 +660,7 @@ function conversationIdFromUrl(urlValue) {
 }
 
 async function runChat(context, message, options = {}) {
+  if (context.isDirect) return require('./direct').chat(context, message, options);
   const settings = loadSettings();
   const requestedModel = options.model || settings.model;
   const requestedEffort = options.effort ?? settings.reasoning_effort;
@@ -739,6 +746,7 @@ module.exports = {
   writeBeatSession,
   findChromium,
   launchBrowser,
+  launchClient,
   newContext,
   getSession,
   performLogin,

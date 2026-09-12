@@ -128,7 +128,7 @@ function progressPrinter(quiet = false) {
 }
 
 async function authenticatedOperation(callback, options = {}) {
-  let browser = await core.launchBrowser();
+  let browser = await core.launchClient();
   let authenticated = null;
   const onProgress = options.onProgress || (() => {});
   const autoRefresh = options.autoRefresh ?? core.loadSettings().auto_refresh;
@@ -145,7 +145,7 @@ async function authenticatedOperation(callback, options = {}) {
         if (!recoverable) throw error;
         if (error.code === 'BROWSER_CLOSED') {
           await browser.close().catch(() => {});
-          browser = await core.launchBrowser();
+          browser = await core.launchClient();
         } else {
           await core.forceRefresh(browser, onProgress);
         }
@@ -173,7 +173,7 @@ async function commandLogin(args) {
   const password = positionals.length === 2 ? positionals[1] : await readHidden('비밀번호: ');
   if (!password) core.fail('비밀번호가 비어 있습니다.');
   if (positionals.length === 2 && !options.quiet) stderr('주의: 명령행 비밀번호는 셸 기록이나 프로세스 목록에 잠시 보일 수 있습니다.');
-  const browser = await core.launchBrowser();
+  const browser = await core.launchClient();
   try {
     const session = await core.performLogin(browser, username, password, {
       storeCredentials: options.store !== false,
@@ -191,7 +191,7 @@ async function commandRefresh(args) {
     ...aliases('quiet', 'boolean', '--quiet', '-q'),
   });
   if (positionals.length) core.fail('사용법: beat refresh');
-  const browser = await core.launchBrowser();
+  const browser = await core.launchClient();
   try {
     await core.forceRefresh(browser, progressPrinter(options.quiet));
     stdout('BeAT 로그인 세션을 새로 발급해 저장했습니다.');
@@ -483,7 +483,7 @@ async function commandRepl(args) {
   if (positionals.length) core.fail('사용법: beat repl [--model 모델] [--continue ID|last]');
   if (!process.stdin.isTTY) core.fail('대화형 모드는 TTY 터미널에서 실행해 주세요.');
   const onProgress = progressPrinter(options.quiet);
-  const browser = await core.launchBrowser();
+  const browser = await core.launchClient();
   let authenticated, context, terminal;
   const autoRefresh = options.refresh ?? core.loadSettings().auto_refresh;
   try {
@@ -582,7 +582,7 @@ async function commandDoctor(args) {
   const checks = [];
   const add = (name, ok, detail) => checks.push({ name, ok, detail });
   add('node', Number(process.versions.node.split('.')[0]) >= 22, process.version);
-  try { add('chromium', true, core.findChromium()); } catch (error) { add('chromium', false, error.message); }
+  add('transport', true, 'HTTP / Direct Line (Chromium 불필요)');
   add('session_file', Boolean(core.loadBeatSession({ optional: true })), core.PATHS.session);
   add('credentials_file', Boolean(core.loadCredentials({ optional: true })), core.PATHS.credentials);
   for (const [name, filename] of [['session_permissions', core.PATHS.session], ['credentials_permissions', core.PATHS.credentials], ['service_permissions', core.PATHS.service]]) {
@@ -611,7 +611,7 @@ function printHelp() {
     `BeAT CLI ${packageInfo.version}`,
     '',
     '사용법:',
-    '  beat setup [--with-deps]              사용자 전용 Codex·Chromium 설치',
+    '  beat setup                          사용자 전용 Codex 설치 (Chromium 불필요)',
     '  beat codex [옵션] [Codex 인자]        BeAT 모델 기반의 별도 Codex',
     '  beat codex config|models|doctor      전용 모델/추론 설정·조회·진단',
     '  beat login <아이디> [비밀번호]       학생 계정 로그인, 세션·갱신 정보 저장',

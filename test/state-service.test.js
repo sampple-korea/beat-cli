@@ -123,18 +123,18 @@ test('portable service starts cold without BeAT credentials, rotates its key, an
 test('service numeric options reject malformed values instead of quietly changing defaults', () => {
   for (const changes of [{ port: 'abc' }, { port: 0 }, { concurrency: 9 }, { max_upload_mb: -1 }, { host: '127.0.0.1; echo bad' }]) assert.throws(() => service.configure(changes));
 });
-test('REPL authentication failure closes the browser and does not leave a live process', async () => {
-  const originalLaunch = core.launchBrowser, originalAuth = core.ensureAuthenticated;
+test('REPL authentication failure closes the HTTP client and does not leave a live process', async () => {
+  const originalLaunch = core.launchClient, originalAuth = core.ensureAuthenticated;
   const originalTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
   Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
   let closed = false;
-  core.launchBrowser = async () => ({ async close() { closed = true; } });
+  core.launchClient = async () => ({ async close() { closed = true; } });
   core.ensureAuthenticated = async () => { throw new Error('expected auth failure'); };
   try {
     await assert.rejects(require('../beat').main(['repl']), /expected auth failure/);
     assert.ok(closed);
   } finally {
-    core.launchBrowser = originalLaunch; core.ensureAuthenticated = originalAuth;
+    core.launchClient = originalLaunch; core.ensureAuthenticated = originalAuth;
     if (originalTTY) Object.defineProperty(process.stdin, 'isTTY', originalTTY);
     else delete process.stdin.isTTY;
   }
