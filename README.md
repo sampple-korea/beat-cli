@@ -4,6 +4,8 @@
 
 `beat codex`는 시스템에 `codex`가 없어도 BeAT 전용 Codex를 자동으로 설치합니다. OpenAI 로그인이나 `OPENAI_API_KEY`를 요구하지 않고, BeAT에 실제로 표시되는 모델과 해당 모델의 추론 단계를 읽어 Codex 모델 선택에 사용합니다. 일반 `codex`의 로그인, 설정, 세션, 실행 파일은 건드리지 않습니다.
 
+Codex 기능만 필요하고 `beat login` 다음 `beat codex` 대신 더 짧은 `beat-codex login`, `beat-codex` 흐름을 원한다면 독립형 저장소 [sampple-korea/beat-codex](https://github.com/sampple-korea/beat-codex)를 사용하세요. Windows, macOS, Linux 설치 명령과 전용 로그인·세션 경로를 제공합니다.
+
 로그인·모델 조회·채팅은 HTTP / Next.js Server Actions / Direct Line 요청으로 처리합니다. 일반 실행에는 Chromium이 필요하지 않습니다. API 모드에서는 BeAT의 `new_assistant_enabled=false`를 요청하고, 호출자가 보낸 시스템 지침과 도구 정의를 보존합니다.
 
 > BeAT의 공식 OpenAI API는 아닙니다. 서버에 네이티브 system/tools 필드를 직접 전달하는 경로는 확인되지 않았으므로 역할과 도구 호출을 텍스트 프로토콜로 연결합니다. BeAT 서버의 기본 지침·기능이 완전히 제거된다고 보장하지 않습니다. [구현·실제 검증 범위](DIRECT-API.md)를 참고하세요.
